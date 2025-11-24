@@ -1,0 +1,22 @@
+{
+  "name": "somnia_streams_hub",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon app.js",
+    "start": "node app.js",
+    "build": "echo 'No build step required'"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@somnia-chain/streams": "^0.9.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "viem": "^2.38.6",
+      "cors": "^2.8.5"
+  }
+}
