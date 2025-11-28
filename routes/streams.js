@@ -1,3 +1,4 @@
+
 const express = require("express");
 const router = express.Router();
 const { SDK, SchemaEncoder, zeroBytes32 } = require("@somnia-chain/streams");
@@ -24,49 +25,89 @@ const playerSchema = `address player, uint256 score`;
 const encoder = new SchemaEncoder(playerSchema);
 
 let schemaId;
-let initPromise;
+let initPromise = null;
 
-(async () => {
-  try {
-    schemaId = await sdk.streams.computeSchemaId(playerSchema);
-    console.log("Schema ID:", schemaId);
+// Helper function to ensure schemaId is initialized
+async function ensureSchemaId() {
+  if (schemaId) {
+    return schemaId;
+  }
 
+  // If already initializing, wait for that to complete
+  if (initPromise) {
+    await initPromise;
+    return schemaId;
+  }
+
+  // Start initialization
+  initPromise = (async () => {
     try {
-      const txHash = await sdk.streams.registerDataSchemas(
-        [
-          {
-            id: "player_score",
-            schema: playerSchema,
-            parentSchemaId: zeroBytes32,
-          },
-        ],
-        true
-      );
+      schemaId = await sdk.streams.computeSchemaId(playerSchema);
+      console.log("Schema ID:", schemaId);
 
-      if (txHash && typeof txHash === 'string' && txHash.startsWith('0x')) {
-        await waitForTransactionReceipt(publicClient, { hash: txHash });
-        console.log(`Schema registered with transaction: ${txHash}`);
-      } else {
-        console.log("Schema already registered — no action required.");
+      try {
+        const txHash = await sdk.streams.registerDataSchemas(
+          [
+            {
+              id: "player_score",
+              schema: playerSchema,
+              parentSchemaId: zeroBytes32,
+            },
+          ],
+          true
+        );
+
+        if (txHash && typeof txHash === 'string' && txHash.startsWith('0x')) {
+          await waitForTransactionReceipt(publicClient, { hash: txHash });
+          console.log(`Schema registered with transaction: ${txHash}`);
+        } else {
+          console.log("Schema already registered — no action required.");
+        }
+      } catch (err) {
+        if (err.message.includes("Nothing to register") || err.message.includes("SchemaAlreadyRegistered")) {
+          console.log("Schema already exists on blockchain — ready to use.");
+        } else {
+          console.warn("Schema registration warning:", err.message);
+        }
       }
     } catch (err) {
-      if (err.message.includes("Nothing to register") || err.message.includes("SchemaAlreadyRegistered")) {
-        console.log("Schema already exists on blockchain — ready to use.");
-      } else {
-        console.warn("Schema registration warning:", err.message);
-      }
+      console.error("Failed to initialize schema:", err.message);
+      initPromise = null; // Reset so it can be retried
+      throw err;
     }
+  })();
+
+  await initPromise;
+  return schemaId;
+}
+
+// Start initialization immediately
+ensureSchemaId().catch(console.error);
+
+router.get("/health", async (req, res) => {
+  try {
+    const address = walletClient.account.address;
+    const balance = await publicClient.getBalance({ address });
+    const id = await ensureSchemaId();
+    
+    res.json({ 
+      status: "ok",
+      wallet: address,
+      balance: balance.toString(),
+      balanceSTT: (Number(balance) / 1e18).toFixed(4),
+      schemaId: id,
+      network: dreamChain.name,
+      rpc: dreamChain.rpcUrls.default.http[0]
+    });
   } catch (err) {
-    console.error("Failed to initialize schema:", err.message);
+    res.status(500).json({ error: err.message });
   }
-})();
+});
 
 router.get("/schema", async (req, res) => {
   try {
-    if (!schemaId) {
-      schemaId = await sdk.streams.computeSchemaId(playerSchema);
-    }
-    res.json({ schemaId });
+    const id = await ensureSchemaId();
+    res.json({ schemaId: id });
   } catch (err) {
     res.status(500).json({ error: "Failed to compute schema ID", message: err.message });
   }
@@ -82,13 +123,21 @@ router.post("/publish", async (req, res) => {
         .json({ error: "Missing player or score" });
     }
 
+    // Ensure schemaId is computed before publishing
+    const currentSchemaId = await ensureSchemaId();
+
     const data = encoder.encodeData([
       { name: "player", value: player, type: "address" },
       { name: "score", value: BigInt(score), type: "uint256" },
     ]);
 
+    // Validate that data was encoded successfully
+    if (!data) {
+      throw new Error("Failed to encode data");
+    }
+
     const dataStreams = [
-      { id: toHex(`player-${Date.now()}`, { size: 32 }), schemaId, data },
+      { id: toHex(`player-${Date.now()}`, { size: 32 }), schemaId: currentSchemaId, data },
     ];
 
     const tx = await sdk.streams.set(dataStreams);
@@ -106,13 +155,11 @@ router.post("/publish", async (req, res) => {
 
 router.get("/data", async (req, res) => {
   try {
-    if (!schemaId) {
-      schemaId = await sdk.streams.computeSchemaId(playerSchema);
-    }
+    const currentSchemaId = await ensureSchemaId();
 
     const publisher = process.env.PUBLISHER_WALLET;
     const allData = await sdk.streams.getAllPublisherDataForSchema(
-      schemaId,
+      currentSchemaId,
       publisher
     );
 
