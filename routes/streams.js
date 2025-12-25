@@ -113,68 +113,12 @@ router.get("/schema", async (req, res) => {
 });
 
 router.post("/publish", async (req, res) => {
-  try {
-    const { player, score, playTime } = req.body;
-
-    if (!player || score == null || playTime == null) {
-      return res
-        .status(400)
-        .json({ error: "Missing player, score, or playTime" });
-    }
-
-    const currentSchemaId = await ensureSchemaId();
-
-    const balance = await publicClient.getBalance({ 
-      address: walletClient.account.address 
-    });
-
-    if (balance === 0n) {
-      return res.status(500).json({ 
-        error: "Insufficient funds: Publisher wallet has zero STT balance",
-        wallet: walletClient.account.address,
-        message: "Please fund this wallet with STT tokens on Somnia Dream network"
-      });
-    }
-
-    const data = encoder.encodeData([
-      { name: "player", value: player, type: "address" },
-      { name: "score", value: BigInt(score), type: "uint256" },
-      { name: "playTime", value: BigInt(playTime), type: "uint256" },
-    ]);
-
-    if (!data) {
-      throw new Error("Failed to encode data");
-    }
-
-    const dataStreams = [
-      { id: toHex(`player-${Date.now()}`, { size: 32 }), schemaId: currentSchemaId, data },
-    ];
-
-    const tx = await sdk.streams.set(dataStreams);
-
-    console.log(
-      `Published: ${player} | Score ${score} | PlayTime ${playTime}s | Tx ${tx}`
-    );
-
-    res.json({ success: true, txHash: tx });
-  } catch (err) {
-    console.error("Publish error:", err);
-    
-    if (err.message?.includes("account does not exist") || err.details?.includes("account does not exist")) {
-      return res.status(500).json({ 
-        error: "Publisher wallet account does not exist or has zero balance",
-        wallet: walletClient.account.address,
-        message: "Please fund this wallet with STT tokens on Somnia Dream network",
-        details: err.shortMessage || err.message
-      });
-    }
-    
-    res.status(500).json({ 
-      error: err.shortMessage || err.message,
-      details: err.details
-    });
-  }
+  return res.status(403).json({
+    error: "Publishing disabled",
+    message: "Score submission is disabled. Leaderboard is read-only."
+  });
 });
+
 
 router.get("/data", async (req, res) => {
   try {
